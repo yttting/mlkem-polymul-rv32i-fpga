@@ -1,2 +1,2 @@
-# Preserve imported evidence and source bytes for SHA256 verification.
-* -text
+# Preserve source and generated artifact bytes for SHA256 verification.
+* -text whitespace=trailing-space,space-before-tab,cr-at-eol

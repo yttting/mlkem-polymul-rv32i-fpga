@@ -1,3 +1,0 @@
-Time resolution is 1 ps
-BRAM PROTOCOL PASS: reset, 16 byte masks, split AW/W, backpressure, busy access, repeat, impulse
-$finish called at time : 198200 ns : File "<CANDIDATE_ROOT>/sim/profile/tb_bram_wrapper_protocol.sv" Line 93

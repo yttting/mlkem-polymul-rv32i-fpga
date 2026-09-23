@@ -1,90 +1,125 @@
-# Build and verification
+# 构建、仿真与烧录
 
-## Toolchain
+## 环境
 
-The migration regression used Windows, AMD Vivado/Vitis 2025.2 and the bundled RISC-V GCC 13.4.0. Install Zynq-7000 device support and use a shell configured for the AMD tools. The firmware build script requires PowerShell and the directory containing `riscv64-unknown-elf-gcc.exe` and its companion tools.
+- Vivado 2024.2，包含 Zynq-7000 器件支持；构建脚本会检查版本。
+- HLS C 仿真或重新综合时使用 Vitis HLS 2024.2。
+- 重新编译固件时需要 PowerShell 和 `riscv64-unknown-elf-gcc` 工具链；使用预编译镜像时不需要 GCC。
 
-Tool installation paths are not hard-coded in the build scripts. Headers such as `ap_int.h` and `hls_stream.h`, FPGA primitives and VIO are supplied by AMD, not this repository.
+除 HLS 命令外，下列命令均从仓库根目录执行。脚本根据自身位置定位源码，不依赖固定安装路径。当前机器的 PowerShell 示例：
 
-## Fixed RTL and firmware regression
-
-From the repository root:
-
-```text
-vivado -mode batch -source scripts/run.tcl -tclargs vio
-vivado -mode batch -source scripts/run.tcl -tclargs board
-vivado -mode batch -source scripts/run.tcl -tclargs protocol
+```powershell
+& 'E:\Xilinx\Vivado\2024.2\bin\vivado.bat' -mode batch -source scripts/run.tcl -tclargs project
 ```
 
-| Mode | Test coverage | Expected log marker |
+如果已经设置 Vivado 环境，直接使用下文的 `vivado` 命令。
+
+## 创建完整工程
+
+```text
+vivado -mode batch -source scripts/run.tcl -tclargs project
+```
+
+省略 `-tclargs project` 时同样创建工程。共享配置位于 `vivado/project.tcl`；生成工程位于：
+
+```text
+vivado/project/mlkem_pynqz2.xpr
+```
+
+该工程包含 RTL、初始化文件、约束、VIO IP 和四个仿真集。可通过 Vivado 的 **Open Project** 打开 `.xpr`，并在 Simulation Sources 中选择仿真集：
+
+| 仿真集 | 顶层 | 用途 |
 |---|---|---|
-| `vio` | Three resets with the same input pair; independent 256-coefficient reference; cycle counts and VIO connections | `BOARD VIO SIM PASS` |
-| `board` | No-VIO LED status and button restart | `PYNQZ2 BOARD SIM PASS` |
-| `protocol` | Reset clearing, byte strobes, backpressure, busy access and ring-boundary arithmetic | `BRAM PROTOCOL PASS` |
+| `sim_1` | `tb_pynqz2_profile_vio` | 默认板级与 VIO 验证 |
+| `sim_board` | `tb_pynqz2_bram_board` | 无 VIO 的 LED 与按钮复位验证 |
+| `sim_protocol` | `tb_bram_wrapper_protocol` | AXI/BRAM 协议与边界用例 |
+| `sim_core` | `tb_v39e_true_one_dsp` | 加速核独立算术验证 |
 
-The script also emits `CANDIDATE_REGRESSION_PASS` on success, retaining the original marker for compatibility. Logs and the generated `.xpr` reside in `build/<mode>_<timestamp>_<pid>/`. Project sources must remain within the repository; installed AMD simulation libraries are external dependencies.
+生成工程引用仓库内的源文件。移动或复制工程时应包含整个仓库；换机器后可重新运行 Tcl 创建工程。Git 保存源文件、Tcl、`.xpr` 和同一工程树中的 VIO `.xci` 配置；完整运行目录保存在本机，缓存、运行数据库和日志由 Git 忽略。
 
-## Rebuild firmware
+首次打开克隆后的 XPR 时，Vivado 可能提示未找到已忽略的缓存和旧运行记录；IP 输出可由 Vivado 重新生成。Tcl 入口会重建固定目录中的工程配置，请先保存自行修改的工程设置；它不修改 `rtl/`、`hls/`、固件或 TB 源码。
 
-```powershell
-./scripts/build_memory_transfer_compare.ps1 -ToolDir 'YOUR_RISCV_BIN_DIRECTORY'
-```
-
-This builds four transfer-loop configurations into `firmware/build/`, using RV32I/ILP32/-O2, checks static RAM layout and rejects M-extension instructions. The linker reserves at least 496 bytes below the stack address; this is a static gap, not proof of maximum runtime stack usage. `firmware/prebuilt/` is never overwritten.
-
-To test newly built mode-3 firmware:
+## 仿真
 
 ```text
-vivado -mode batch -source scripts/run.tcl -tclargs vio firmware/build
+vivado -mode batch -source scripts/run.tcl -tclargs core
+vivado -mode batch -source scripts/run.tcl -tclargs protocol
+vivado -mode batch -source scripts/run.tcl -tclargs board
+vivado -mode batch -source scripts/run.tcl -tclargs vio
 ```
 
-Fixed cycle assertions apply to the archived toolchain and hardware configuration. Compiler changes can alter cycle counts; any revised expectations require an independently verified and documented baseline.
+| 模式 | 检查范围 | 测试通过标记 |
+|---|---|---|
+| `core` | 三组核心算术测试 | `V39-E MANUAL RTL COSIM PASS` |
+| `protocol` | 复位、字节写使能、独立 AW/W、反压、忙时访问及算术边界 | `BRAM PROTOCOL PASS` |
+| `board` | 固件自检、LED、按钮重新启动 | `PYNQZ2 BOARD SIM PASS` |
+| `vio` | 三次复位、独立 256 系数参考计算、周期计数与 VIO 连接 | `BOARD VIO SIM PASS` |
 
-## HLS source
+各模式均根据 Tcl 创建 `vivado/project/` 工程，再选择对应仿真集运行。仿真日志位于 `vivado/project/mlkem_pynqz2.sim/<simset>/behav/xsim/simulate.log`；运行目录由 Git 忽略。周期断言对应仓库原有 RTL 和预编译固件；重新编译固件后，编译器差异可能改变周期数。
 
-Run from `hls/` so config paths resolve locally:
-
-```text
-vitis-run --mode hls --csim --config hls_config.cfg --work_dir ../build/hls_csim
-v++ --mode hls --config hls_config.cfg --work_dir ../build/hls_synthesis
-```
-
-The main C++ file includes `mlkem_poly_mul256_v39e_unified_stream_support.cpp`; this support file must not be compiled as a separate translation unit. C simulation checks three input cases against an independent O(N^2) convolution reference. The synthesis command is provided for subsequent development; HLS synthesis and RTL co-simulation were not rerun during the migration regression. Neither command automatically replaces `rtl/accelerator/`.
-
-### Windows drive-local `/dev/null` failure
-
-On the validation machine, a pre-existing ordinary file at the D-drive root's `dev/null` caused GNU Make to report `/dev/null:1: missing separator` before compilation. No source correction was needed. Running the HLS build in a fresh C-drive temporary directory passed all three C tests. Do not delete or overwrite that unrelated file as part of project setup.
-
-For the same symptom, run the following from the **repository root**, using a temporary directory on a drive without the conflicting file:
-
-```powershell
-$config = (Resolve-Path './hls/hls_config.cfg').Path
-$taskCsim = Join-Path $env:TEMP ('mlkem-csim-' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $taskCsim | Out-Null
-Push-Location $taskCsim
-try {
-    vitis-run --mode hls --csim --config $config --work_dir component
-    if ($LASTEXITCODE -ne 0) { throw 'HLS C simulation failed; inspect component/logs/.' }
-}
-finally { Pop-Location }
-```
-
-This workaround changes only the build-output location. The created temporary component is retained for inspection; this recipe does not clean up unrelated files. Ensure the command exits successfully and the log contains `CSim done with 0 errors`.
-
-## Implementation and board
+## 综合、实现与烧录文件
 
 ```text
 vivado -mode batch -source scripts/run.tcl -tclargs implement
 ```
 
-Run this command from the repository root. It requests VIO simulation, synthesis, place and route, and bitstream generation; it does not program a board. This script's implementation path was not exercised during the migration regression, and the archived routed reports predate that regression.
+该模式使用 `vivado/project/` 工程，通过 `core`、`protocol`、`board`、`vio` 四组仿真后完成综合、布局布线和 bitstream 生成。匹配的 `mlkem_pynqz2.bit`、`mlkem_pynqz2.ltx` 导出至 `release/` 并纳入 Git；资源、时序、bus-skew 与 DRC 报告保存在 `build/reports/`。完成后执行 `./scripts/update_release_checksums.ps1` 更新产物校验文件。实际结果见 [验证记录](VALIDATION.md)。
 
-Before programming, inspect the generated timing and DRC reports. Completion of bitstream generation alone does not establish timing closure. Use the BIT and LTX files from the same build. After programming through Hardware Manager, source `scripts/read_board_vio.tcl` in the Vivado Tcl Console to save a read-only snapshot under `build/hardware/`.
+连接 PYNQ-Z2 的 JTAG 后，可在 Hardware Manager 中加载同次构建的 BIT/LTX，或显式执行：
 
-BTN0 resets the system. A successful firmware self-test produces `LED[3:0]=0101`: PASS and done asserted, error and trap deasserted.
+```text
+vivado -mode batch -source scripts/program_board.tcl
+```
 
-## Optional experiment sources
+**上述烧录命令会配置已连接的开发板。** 它使用 `release/` 的烧录文件；创建工程和实现命令均不会自动调用它。
 
-`firmware/profile_firmware.c` implements six-stage profiling; `prepare_compare_firmware.c` compares input preparation methods. The `software_profile.c`, `software_polymul.c` and `software_start.S` files implement the RV32I software baseline.
+固件上电后运行自检。`BTN0` 复位并重新启动系统；成功时 `LED[3:0] = 0101`，即 PASS 与 done 置位，error 与 trap 清零。在 GUI Hardware Manager 中连接并加载 BIT/LTX 后，可在 Tcl Console 运行：
 
-These experiments are not selected by `scripts/run.tcl` and require separate source sets and matching firmware images. The software compute monitor uses fixed instruction addresses tied to `firmware/prebuilt/software_o2.mem`; rebuilding that image requires revalidating the monitor boundaries.
+```tcl
+source scripts/read_board_vio.tcl
+```
+
+该脚本读取 VIO 状态并将快照保存至 `build/hardware/`。本次仓库整理未对实体开发板执行烧录或验收。
+
+## 固件
+
+运行 `./scripts/verify_sources.ps1` 可核对本次保留的 52 个源码、约束和初始化文件是否仍与整理前一致。
+
+```powershell
+./scripts/build_memory_transfer_compare.ps1 -ToolDir 'YOUR_RISCV_BIN_DIRECTORY'
+```
+
+也可通过 `RISCV_TOOLCHAIN_BIN` 环境变量指定工具链。脚本以 RV32I/ILP32、`-O2` 编译 `firmware/src/memory_transfer_compare_firmware.c`，使用 `firmware/linker/link.ld`，检查镜像容量、静态 RAM 布局及是否出现 M 扩展指令。输出位于 `build/firmware/`，不会覆盖 `firmware/images/`。
+
+| 镜像 | 传输循环 |
+|---|---|
+| `transfer_baseline.mem` | 基线 |
+| `transfer_write_unroll4.mem` | 写循环展开四次 |
+| `transfer_read_unroll4.mem` | 读循环展开四次 |
+| `transfer_both_unroll4.mem` | 读写循环均展开四次，默认镜像 |
+
+使用新编译的默认镜像进行仿真：
+
+```text
+vivado -mode batch -source scripts/run.tcl -tclargs vio build/firmware
+```
+
+静态 RAM 检查不代表已测量运行时最大栈深度。不要仅因新编译结果导致周期断言失败就修改测试期望值，应先核对工具链与功能结果。
+
+## HLS 源码与 C 仿真
+
+在 Vitis 2024.2 环境中，先进入 `hls/`，使配置中的相对路径正确解析：
+
+```text
+vitis-run --mode hls --csim --config hls_config.cfg --work_dir ../build/hls_csim
+```
+
+独立 C 测试以直接卷积检查三组输入。主文件包含 `mlkem_poly_mul256_v39e_unified_stream_support.cpp`，不要将该支持文件再作为独立编译单元添加。
+
+如需后续重新综合：
+
+```text
+v++ --mode hls --config hls_config.cfg --work_dir ../build/hls_synthesis
+```
+
+这些命令不替换 `rtl/accelerator/`。现有加速核 RTL 来自 Vitis HLS 2025.2；C 仿真通过不能证明 HLS 2024.2 重新生成的 RTL 与现有快照等价。更新快照需要单独完成 RTL 仿真、协同仿真及实现验证。

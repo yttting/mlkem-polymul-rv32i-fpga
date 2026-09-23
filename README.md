@@ -1,56 +1,49 @@
-# ML-KEM PolyMul RV32I FPGA Accelerator
+# ML-KEM PolyMul · PicoRV32 · PYNQ-Z2
 
-This repository implements polynomial multiplication in `Z_3329[x]/(x^256+1)` using a shared HLS arithmetic engine controlled by PicoRV32 over AXI4-Lite. It targets PYNQ-Z2 (`xc7z020clg400-1`) at a 100 MHz PL clock, without using the Zynq PS.
+本工程在 PYNQ-Z2 的 PL 端运行 PicoRV32 RV32I，通过 AXI4-Lite 和 BRAM 接口驱动 ML-KEM 多项式乘法加速核。目标器件为 `xc7z020clg400-1`，板载 125 MHz 时钟经 MMCM 转为 100 MHz；工程采用纯 RTL，不使用 Zynq PS 或 Block Design。
 
-The implemented operation is `FNTT(A) -> FNTT(B) -> BaseMul -> INTT -> FinalScale`. The repository does not implement complete ML-KEM key generation, encapsulation or decapsulation, and has not been evaluated for side-channel resistance.
+运算为 `FNTT(A) → FNTT(B) → BaseMul → INTT → FinalScale`，计算环 `Z_3329[x]/(x^256+1)` 中的多项式乘法。这是完整 ML-KEM 算法中的运算模块。
 
-The default configuration uses the BRAM wrapper in `rtl/axi/`, mode-3 firmware with both transfer loops unrolled four times, and optional read-only VIO. The register-based comparison implementation is isolated under `experiments/` and excluded from the default build.
+![系统结构](docs/architecture.svg)
 
-![Architecture](docs/architecture.svg)
+## 快速开始
 
-## Start here
+使用 **Vivado 2024.2**，安装 Zynq-7000 器件支持。克隆后可直接打开 [mlkem_pynqz2.xpr](vivado/project/mlkem_pynqz2.xpr)。如需重新生成完整工程，从仓库根目录运行：
 
-- [中文目录与文件说明](docs/START_HERE_CN.md)
-- [Build and verification](docs/BUILD.md)
-- [Results and measurement boundaries](docs/RESULTS.md)
-- [License status and third-party notices](THIRD_PARTY_NOTICES.md)
-- [Migration verification](docs/MIGRATION_VALIDATION.md)
-- `SOURCE_MANIFEST.csv`: original imported hashes and relative source categories.
-- `FINAL_MANIFEST.csv`: current file inventory and SHA256 hashes, excluding itself and generated builds.
+```text
+vivado -mode batch -source scripts/run.tcl -tclargs project
+```
 
-## Quick simulation
-
-Simulation requires Vivado 2025.2 with Zynq-7000 device support, but does not require a physical board.
-
-From this directory in a Vivado-enabled shell:
+生成的完整工程位于 `vivado/project/`，打开其中的 `mlkem_pynqz2.xpr` 即可使用 GUI。默认顶层为 `mlkem_polymul_pynqz2_top`，启用只读 VIO，固件为 `firmware/images/transfer_both_unroll4.mem`。
 
 ```text
 vivado -mode batch -source scripts/run.tcl -tclargs vio
-vivado -mode batch -source scripts/run.tcl -tclargs protocol
+vivado -mode batch -source scripts/run.tcl -tclargs implement
 ```
 
-`vio` repeats the same deterministic input pair across three resets, checking all 256 output coefficients against an independent convolution reference. It also checks cycle counts and VIO connections. `protocol` tests AXI transactions and arithmetic edge cases.
+`vio` 运行板级仿真；`implement` 通过四组仿真后完成综合、布局布线和 bitstream 生成，导出烧录文件至 `release/`、报告至 `build/reports/`。工程创建和实现不会自动烧录开发板。
 
-Each run creates `build/<mode>_<timestamp>_<pid>/mlkem.xpr`; generated projects are not tracked in Git. The script requires project sources to reside within the repository root. See [BUILD.md](docs/BUILD.md) for command locations, expected outputs and tool dependencies.
-
-## Layout
+## 目录
 
 ```text
-hls/          Complete HLS source, independent C testbench and config
-rtl/          Active CPU, generated core, BRAM wrapper and board/system RTL
-firmware/     Firmware source, linker script and reference data
-  prebuilt/   Archived text memory images for fixed-cycle reproduction
-sim/          Core, board, protocol, software and observer test sources
-constraints/  Device pin and clock/reset constraints
-scripts/      Portable project creation, simulation and firmware entrypoints
-experiments/  Isolated old-wrapper comparison sources
-evidence/     Historical reports and migration logs, with local paths redacted
-docs/         Usage, measurement scopes, file map and migration checks
-build/        Regenerated local projects and logs (ignored)
+rtl/          CPU、加速核、AXI/BRAM 接口、系统与板级 RTL
+constraints/  PYNQ-Z2 引脚、时钟与复位约束
+hls/          HLS C++ 源码、独立 C 测试与配置
+firmware/     固件源码、链接脚本和四种预编译 transfer 镜像
+tb/           核心、板级、协议测试与周期监测器
+vivado/       Vivado 工程共享配置、完整工程与 VIO IP 配置
+scripts/      工程创建、仿真、实现、固件编译与 JTAG 烧录入口
+docs/         构建说明、目录职责与本次验证记录
+release/      已验证构建的 BIT 与匹配 LTX 烧录文件
+build/        本地编译结果与报告（Git 忽略）
 ```
 
-Legacy `v39e` names inside HLS/generated RTL are intentionally preserved to avoid changing module references or invalidating hierarchy-based observers. HLS C simulation does not establish equivalence between regenerated RTL and the archived RTL snapshot. Run synthesis, co-simulation and implementation before updating that snapshot.
+- [构建、仿真与烧录](docs/BUILD.md)
+- [目录与维护规则](docs/STRUCTURE.md)
+- [验证记录](docs/VALIDATION.md)
+- [保留源码哈希清单](docs/source_integrity.csv)
+- [第三方组件说明](THIRD_PARTY_NOTICES.md)
 
-## License status
+版本库包含 `.xpr`、VIO `.xci` 和 `release/` 烧录文件。仿真、综合、实现缓存保留在本地，并由 Git 忽略。
 
-The source is publicly hosted, but no project-wide license has been selected. Existing third-party notices remain applicable; public access does not grant a blanket license to reuse or redistribute all files. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for component-level provenance and outstanding license questions.
+本次整理保留功能源码、测试代码和预编译镜像的原始内容；仅调整组织方式和构建路径。`rtl/accelerator/` 是原有 Vitis HLS 2025.2 生成的 RTL，本工程使用 Vivado 2024.2 构建该快照，并未用 HLS 2024.2 重新生成或证明两版 HLS 输出等价。

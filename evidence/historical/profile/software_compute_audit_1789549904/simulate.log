@@ -1,7 +1,0 @@
-Time resolution is 1 ps
-SOFTWARE COMPUTE BEGIN pc=000003ac cycle=21628
-SOFTWARE COMPUTE END pc=000000d4 cycle=2071734 compute_cycles=2050106
-SOFTWARE BASELINE PASS cycles=2050123 rdcycle=4 words=128
-SOFTWARE COMPUTE AUDIT PASS compute_cycles=2050106 rdcycle_window=2050123 boundary_difference=17 words=128 errors=0
-$finish called at time : 20804210 ns : File "<ORIGINAL_PROJECT_ROOT>/sim/profile/tb_software_baseline.sv" Line 71
-INFO: xsimkernel Simulation Memory Usage: 23572 KB (Peak: 23572 KB), Simulation CPU Usage: 30187 ms

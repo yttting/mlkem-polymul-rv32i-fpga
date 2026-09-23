@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 
 $projectDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $firmwareDir = Join-Path $projectDir 'firmware'
-$buildDir = Join-Path $firmwareDir 'build'
+$buildDir = Join-Path $projectDir 'build/firmware'
 if (-not $ToolDir) { throw 'Set RISCV_TOOLCHAIN_BIN or pass -ToolDir (directory containing riscv64-unknown-elf-gcc.exe).' }
 $toolDir = $ToolDir
 $gcc = Join-Path $toolDir 'riscv64-unknown-elf-gcc.exe'
@@ -18,8 +18,9 @@ foreach ($tool in @($gcc, $objcopy, $objdump, $size, $nm)) {
 New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
 
 function Build-TransferMode([string]$Name, [int]$Mode) {
-    $source = Join-Path $firmwareDir 'memory_transfer_compare_firmware.c'
-    $linker = Join-Path $firmwareDir 'link.ld'
+    $source = Join-Path $firmwareDir 'src/memory_transfer_compare_firmware.c'
+    $linker = Join-Path $firmwareDir 'linker/link.ld'
+    $includeDir = Join-Path $firmwareDir 'include'
     $prefix = Join-Path $buildDir ("transfer_" + $Name)
     $elf = $prefix + '.elf'
     $map = $prefix + '.map'
@@ -31,7 +32,7 @@ function Build-TransferMode([string]$Name, [int]$Mode) {
 
     & $gcc -march=rv32i -mabi=ilp32 -nostdlib -nostartfiles -ffreestanding `
         -fno-pic -fno-builtin -O2 "-DLOOP_MODE=$Mode" `
-        '-Wl,--build-id=none' "-Wl,-Map,$map" -T $linker $source -o $elf
+        '-Wl,--build-id=none' "-Wl,-Map,$map" -I $includeDir -T $linker $source -o $elf
     if ($LASTEXITCODE -ne 0) { throw "$Name firmware gcc failed" }
 
     & $objdump -d -S $elf | Set-Content -Encoding ascii $dump

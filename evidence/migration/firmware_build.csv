@@ -1,5 +1,0 @@
-"Mode","ModeId","BinBytes","TextBytes","EndAddress","StackGap"
-"baseline","0","1240","728","0x000008d8","1816"
-"write_unroll4","1","1340","828","0x0000093c","1716"
-"read_unroll4","2","1384","872","0x00000968","1672"
-"both_unroll4","3","1480","968","0x000009c8","1576"
